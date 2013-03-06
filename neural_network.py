@@ -1,9 +1,48 @@
+"""
+=====================
+``neural_network.py``
+=====================
+
+Contents
+--------
+
+* ``Neuron`` A single Neuron in a neural network.  Accepts a function passed
+             to it to be it's activation function.  Input and output layers
+             are also composed of Neuron objects, as well as bias terms.
+
+* ``NeuralNetwork`` A feed-forward network of Neuron objects, where each
+                    neuron feeds every Neuron object in the next layer. Takes
+                    a layer_config argument and accepts either a single
+                    activation_func argument or a list of activation functions
+                    with the same dimensionality as the layer config (minus
+                    the input layer).  Supports inertia for MLPs and accepts a
+                    learning rate.
+
+* ``NeuralNetworkManager`` Instantiates a NeuralNetwork, given an iterable of
+                           training samples, a function that returns the
+                           desired output for a given sample, and a
+                           layer_config.  Stops when the desired error is
+                           reached or after the desired number of epochs.
+                           Accepts the same activation function, learning
+                           rate, and inertia arguments as NeuralNetwork and
+                           passes them along.
+
+"""
+#TODO(jfriedly): rewrite using enumerate instead of xrange and indexes
+#TODO(jfriedly): rewrite the matrix algebra stuff using numpy or something
+#TODO(jfriedly): use functools instead of lambdas (not any faster, but more
+#                readable)
+#TODO(jfriedly): rewrite old code to support new module layout
+#TODO(jfriedly): document this module better
+#TODO(jfriedly): Make bias neurons simply have an activation function that
+#                always returns 1 rather than special-casing them.
+
+from utils import sigmoid
+
 import random
-import math
 import operator
 import datetime
 import types
-import numpy
 import sys
 try:
     import pylab
@@ -11,43 +50,6 @@ try:
 except ImportError:
     print "Cannot import matplotlib so graphs will not be drawable.\n"
     GRAPHS_DRAWABLE = False
-#TODO(jfriedly): rewrite the matrix algebra stuff using numpy or something
-#TODO(jfriedly): use functools instead of lambdas (not any faster, but more
-#                readable)
-
-
-def sigmoid(v, a=1):
-    """Logistic sigmoid function (default activation for a network).
-    """
-    return 1 / (1 + math.exp(-a * v))
-
-
-def piecewise_linear(v):
-    """Piecewise linear activation function.
-    """
-    if v < -1:
-        return -1
-    elif v > 1:
-        return 1
-    return v
-
-
-def binary_threshold(v, threshold=0.5):
-    """Threshold activation function returning binary values.
-    """
-    return 1 if v > threshold else 0
-
-
-def bipolar_threshold(v, threshold=0.5):
-    """Threshold activation function returning bipolar values.
-    """
-    return 1 if v > threshold else -1
-
-
-def euclidean_distance(input1, input2):
-    """Returns the Euclidean Distance between two points.
-    """
-    return numpy.linalg.norm(numpy.array(input1) - numpy.array(input2))
 
 
 class Neuron():
@@ -59,6 +61,12 @@ class Neuron():
 
         bias and input should not both be true at the same time, even for
         the bias neuron to the first hidden layer.
+
+        :param activation_func: Activation function for this neuron.
+        :param bias: Boolean indicating that the neuron is a bias neuron.
+        :param input: If False, the neuron will not be an input neuron;
+                      otherwise the value of input will be this input
+                      neuron's value.
         """
         if activation_func:
             self.activate = activation_func
@@ -78,52 +86,37 @@ class Neuron():
         return "<Regular Neuron>"
 
 
-class Cluster():
-    """Class to represent a single cluster in the K-Means algorithm.
-    """
-
-    def __init__(self, center):
-        """Initialize the cluster.
-        """
-        self.center = center
-        self.assigned_inputs = []
-        self.variance = 0
-
-    def recalculate_center(self):
-        """Recalculates the center of the cluster.
-        """
-        # if we don't have any assigned inputs after this K-Means epoch, leave
-        # the center where it was
-        if self.assigned_inputs:
-            new_center = []
-            for dimension in xrange(len(self.assigned_inputs[0])):
-                total = reduce(operator.add,
-                               [x[dimension] for x in self.assigned_inputs])
-                new_center.append(float(total) / len(self.assigned_inputs))
-            self.center = new_center
-
-
 class NeuralNetwork():
     """Class to represent a network of neurons.
     """
 
     def __init__(self, layer_config, activation_func=sigmoid, eta=0.05,
-                 use_inertia=False, alpha=1.0, activation_funcs=None,
-                 **kwargs):
+                 use_inertia=False, alpha=1.0, activation_funcs=None):
         """Initialize the network.
 
         layer_config will be a list containing the number of neurons in each
-        consecutive layer.  Extra keyword arguments are passed to the
-        activation function.  Input layer is counted as a layer and all
-        non-output layers are assumed to have one extra node, a bias node.
+        consecutive layer.  The input layer is counted as a layer and all
+        non-output layers will be given one extra neuron, a bias neuron.
 
-        Example layer_config argument (for first lab): [4, 4, 1]
+        Example layer_config argument (for CSE 5526 lab1): [4, 4, 1]
 
-        eta is the learning rate (sometimes called alpha)
-        alpha is the weight applied to inertia (if inertia is enabled)
+        :param layer_config: The layer configuration, as described above.
+        :param activation_func: The single activation function to give all
+                                hidden layer neurons.
+        :param eta: The learning rate (sometimes called alpha).
+        :param alpha: The weight applied to inertia on an MLP (if inertia is
+                      enabled)
+        :param use_inertia: Boolean of whether or not to apply inertia to an
+                            MLP.
+        :param activation_funcs: The list of activation functions to give the
+                                 hidden layer neurons.  Must have the same
+                                 dimensions as layer_config excluding the
+                                 first element in layer_config, which will be
+                                 the input layer.
 
         self.num_layers is the number of layers (including the input layer)
         self.m is the number of input vectors
+        See reset_weights() for documentation on self.weights
         """
         self.eta = eta
         self.alpha = alpha
@@ -145,6 +138,10 @@ class NeuralNetwork():
         The zeroth layer will be the input layer.
         Each non-output layer will have a bias neuron as the last neuron in
         the layer.
+
+        :param activation: List of activation functions to assign to the
+                           hidden layer neurons or a single activation
+                           function to assign to every hidden layer neuron.
         """
         # create hidden layers and output layer, using a unique activation
         # function for each neuron if provided, otherwise using the same
@@ -171,7 +168,9 @@ class NeuralNetwork():
         """Returns a weight matrix with every weight set to the given value.
         See the docstring for reset_weights() below for more info.
 
-        value can be a curried function.
+        :param value: A static value to assign all the weights to or a
+                      function taking the neuron's location and returning
+                      the desired weight.
         """
         weights = []
         # create a 2D matrix of weights for all but the input layer
@@ -181,8 +180,8 @@ class NeuralNetwork():
             # layer
             for j in xrange(self.layer_config[i]):
                 # create a weight for each neuron in the previous layer
-                if isinstance(value, types.MethodType):
-                    neuron_weights = [value() for x in
+                if hasattr(value, '__call__'):
+                    neuron_weights = [value(i, j) for x in
                                       xrange(len(self._prev_layer(i)))]
                 else:
                     neuron_weights = [value for x in
@@ -211,26 +210,37 @@ class NeuralNetwork():
 
     def _next_layer(self, layer):
         """Returns the next layer of neurons.
+
+        :param layer: Index of the current layer.
         """
         return self.layers[layer + 1]
 
     def _prev_layer(self, layer):
         """Returns the previous layer of neurons.
+
+        :param layer: Index of the current layer.
         """
         return self.layers[layer - 1]
 
     def _weights_to(self, layer):
         """Returns the weight matrix to a given layer.
+
+        :param layer: Index of the current layer.
         """
         return self.weights[layer - 1]
 
     def _weights_from(self, layer):
         """Returns the weight matrix from a given layer.
+
+        :param layer: Index of the current layer.
         """
         return self.weights[layer]
 
     def set_inputs(self, inputs):
         """Sets the values of the input neurons.
+
+        :param inputs: List of inputs to go on the input neurons (not
+                       including the bias neuron in the input layer).
         """
         # sanity check
         assert(len(inputs) == self.m)
@@ -259,8 +269,10 @@ class NeuralNetwork():
         return [neuron.value for neuron in self.layers[-1]]
 
     def natural_error(self, output, desired):
-        """Implements natural error-based learning.  Only works for single-layer
-        perceptrons.
+        """Implements natural error-based learning.  Only works for SLPs.
+
+        :param output: Iterable of the output layer's values.
+        :param desired: Iterable of the desired output values.
         """
         error = map(lambda y, x: y - x, desired, output)
         for i in xrange(len(self.weights[0])):
@@ -270,7 +282,11 @@ class NeuralNetwork():
 
     # FIXME this won't work outside of lab2
     def lms(self, output, desired):
-        """Implements LMS learning, specifically for lab2 (not reusable).
+        """Implements LMS learning, specifically for CSE 5526 lab2 (not
+        reusable).
+
+        :param output: Iterable of the output layer's values.
+        :param desired: Iterable of the desired output values.
         """
         error = desired[0] - output[0]
         for i in xrange(len(self.weights[1][0])):
@@ -278,8 +294,11 @@ class NeuralNetwork():
             self.weights[1][0][i] += self.eta * value * error
 
     def backpropagate(self, output, desired):
-        """Runs backpropogation starting with the output layer back until
-        it reaches the input layer, updating weights along the way.
+        """Runs backpropagation starting with the output layer back until
+        it reaches the input layer, batch updating weights along the way.
+
+        :param output: Iterable of the output layer's values.
+        :param desired: Iterable of the desired output values.
         """
         # [::-1] iterates backwards through the list, and we iterate over each
         # 2D weight matrix
@@ -287,8 +306,9 @@ class NeuralNetwork():
             # We now iterate over every list of weights to a neuron in the
             # next layer
             for j in xrange(len(self.weights[i])):
-                local_gradient = self._calculate_local_gradient(i, j, output,
-                                                                desired)
+                local_gradient = self._calc_sigmoid_local_gradient_(i, j,
+                                                                    output,
+                                                                    desired)
                 # We now iterate over every weight to a neuron in the next
                 # layer
                 for k in xrange(len(self.weights[i][j])):
@@ -299,13 +319,16 @@ class NeuralNetwork():
     def use(self, sample):
         """Takes a real-life sample (not one from the training_set) and
         returns the trained neural networks' output for that sample.
+
+        :param sample: Iterable of values to place on the input layer (not
+                       including the bias neuron to the first hidden layer).
         """
         self.set_inputs(sample)
         return self.forward_propagate()
 
     def _batch_update_weights(self):
-        """We need to update all the weights at once as a batch or else
-        backpropogation will influence itself.
+        """Update all the weights at once as a batch so that backpropagation
+        doesn't influence itself.
         """
         for i in xrange(len(self.weights)):
             for j in xrange(len(self.weights[i])):
@@ -318,27 +341,33 @@ class NeuralNetwork():
                         self.old_updates[i][j][k] = pep8_temp
                     self.weights[i][j][k] += self.weight_updates[i][j][k]
 
-    def _calculate_local_gradient(self, i, j, output, desired, a=1):
+    def _calc_sigmoid_local_gradient(self, i, j, output, desired, a=1):
         """Calculates the error gradient at a neuron, assuming its activation
         function was a sigmoid function.
 
-        i is the index of the layer (in self.weights)
-        j is the index of the neuron in the layer
+        :param i: The index of the layer in self.weights
+        :param j: The index of the neuron in the layer
+        :param output: Iterable of the output layer's values.
+        :param desired: Iterable of the desired output values.
+        :param a: Weight to apply to the gradient.
         """
+        # If we're the first layer behind the output layer, calculate the
+        # gradient directly
         if i == len(self.layer_config) - 2:
             return a * (desired[j] - output[j]) * output[j] * (1 - output[j])
+        # Otherwise, use recursion to get the gradient.
         gradient = (a * self.layers[i + 1][j].value *
                     (1 - self.layers[i + 1][j].value))
         summation = sum(map(operator.mul,
                             (neuron_weights[j] for neuron_weights in
                              self.weights[i + 1]),
-                            (self._calculate_local_gradient(i + 1, new_j,
+                            (self._calc_sigmoid_local_gradient(i + 1, new_j,
                                                             output, desired)
                              for new_j in xrange(len(self.weights[i + 1])))))
         return gradient * summation
 
-    def _rand(self):
-        """Returns a random value between -1 and 1.
+    def _rand(self, *args):
+        """Returns a random value between -1 and 1.  Ignores any arguments.
         """
         return random.random() - random.random()
 
@@ -360,14 +389,39 @@ class NeuralNetworkManager():
     def __init__(self, training_set, desired, layer_config,
                  stop_on_desired_error=False, desired_error=0.0,
                  activation_func=sigmoid, eta=0.05, use_inertia=False,
-                 alpha=0.9, activation_funcs=None, max_epochs=sys.maxint,
-                 **kwargs):
+                 alpha=0.9, activation_funcs=None, max_epochs=sys.maxint):
         """Initializes the NeuralNetworkManager.
 
-        training_set is an iterable of all the training samples.
-        desired is a function that returns the desired output as a list
-        desired_error is the absolute error allowed for each sample in the
-        training set
+        layer_config will be a list containing the number of neurons in each
+        consecutive layer.  The input layer is counted as a layer and all
+        non-output layers will be given one extra neuron, a bias neuron.
+
+        Example layer_config argument (for CSE 5526 lab1): [4, 4, 1]
+
+        :param training_set: An iterable of all the training samples (each an
+                             iterable itself).
+        :param desired: A function that, given an input vector, returns the
+                        desired output vector as a list.
+        :param layer_config: The layer configuration, as described above.
+        :param stop_on_desired_error: Boolean indicating whether or not the
+                                      algorithm should terminate when a
+                                      desired error is reached.
+        :param desired_error: The absolute error allowed for each sample in
+                              the training set.
+        :param activation_func: The single activation function to give all
+                                hidden layer neurons.
+        :param eta: The learning rate (sometimes called alpha).
+        :param alpha: The weight applied to inertia on an MLP (if inertia is
+                      enabled)
+        :param use_inertia: Boolean of whether or not to apply inertia to an
+                            MLP.
+        :param activation_funcs: The list of activation functions to give the
+                                 hidden layer neurons.  Must have the same
+                                 dimensions as layer_config excluding the
+                                 first element in layer_config, which will be
+                                 the input layer.
+        :param max_epochs: Integer of the maximum number of epochs the
+                           algorithm should run for.
         """
         self.training_set = training_set
         self._elapsed_epochs = 0
@@ -378,20 +432,21 @@ class NeuralNetworkManager():
         self.desired_error = desired_error
         self.network = NeuralNetwork(layer_config, activation_func, eta=eta,
                                      use_inertia=use_inertia, alpha=alpha,
-                                     activation_funcs=activation_funcs,
-                                     **kwargs)
+                                     activation_funcs=activation_funcs)
 
     @property
     def elapsed_epochs(self):
-        """Turns the elapsed_epochs variable into a public one nicely.
+        """Turns the self._elapsed_epochs variable into a public one nicely.
         """
         return self._elapsed_epochs
 
     @elapsed_epochs.setter
-    def elapsed_epochs(self, value):
-        """Gives public write access to the elapsed_epochs variable.
+    def elapsed_epochs(self, num_epochs):
+        """Gives public write access to the self._elapsed_epochs variable.
+
+        :param num_epochs: Number of epochs to set self._elapsed_epochs to.
         """
-        self._elapsed_epochs = value
+        self._elapsed_epochs = num_epochs
 
     def get_inputs(self):
         """Gets the next set of inputs for an epoch.
@@ -418,6 +473,9 @@ class NeuralNetworkManager():
 
     def run_epoch(self, method):
         """Runs through an epoch using the desired method (see below).
+
+        :param method: Method of the NeuralNetwork class to use as the
+                       training algorithm.
         """
         self.initialize_epoch()
         for x in xrange(len(self.training_set)):
@@ -436,7 +494,15 @@ class NeuralNetworkManager():
 
     def learn(self, method):
         """Runs through epochs until an exit condition is reached using the
-        desired method (currently backpropogation or LMS).
+        desired method (currently backpropagation or LMS).  This can be
+        referenced using the public ``network`` attribute of a
+        NeuralNetworkManager instance::
+
+            nnm = NeuralNetworkManager(*args, **kwargs)
+            nnm.learn(nnm.network.backpropagation)
+
+        :param method: Method of the NeuralNetwork class to use as the
+                       training algorithm.
         """
         self.network.reset_weights()
         while not self.run_epoch(method):
@@ -451,92 +517,3 @@ class NeuralNetworkManager():
                 " and %d seconds" % (len(self.network.layers) - 1,
                 self.elapsed_epochs,
                 (datetime.datetime.now() - self.init_time).seconds))
-
-
-class KMeansClassifier():
-    """K-Means classifier.
-    """
-
-    def __init__(self, inputs, K):
-        """Initialize the class.
-
-        inputs is expected to be a list of vectors, where each vector is one
-        sample.
-        """
-        self.inputs = inputs
-        self.K = K
-        self.clusters = [Cluster(random.sample(inputs, 1)[0]) for i in
-                         xrange(K)]
-        self.last_clusters_centers = []
-
-    def get_variances(self, one_variance=False):
-        """Returns the squared variance for each cluster in a list of length K.
-
-        If one_variance is set to True, it will return the same variance for
-        each cluster as calculated by sigma^2 = d_max^2 / 2K
-        Otherwise, the variance will be determined individually using the
-        following formula:
-
-        sigma^2 = sum ||x - mu||^2          if the cluster contains more than
-                                            one input
-        sigma^2 = avg(all other sigma^2's)  if the cluster contains only one
-                                            input
-        """
-        if one_variance:
-            d_max = 0
-            for cluster in self.clusters:
-                this_d_max = max([euclidean_distance(cluster.center, x.center)
-                                  for x in self.clusters])
-                if this_d_max > d_max:
-                    d_max = this_d_max
-            for cluster in self.clusters:
-                cluster.variance = (d_max / (2 * self.K)) ** 2
-        else:
-            one_input_clusters = []
-            for cluster in self.clusters:
-                if len(cluster.assigned_inputs) == 1:
-                    one_input_clusters.append(cluster)
-                    continue
-                cluster.variance = sum([euclidean_distance(x,
-                                                           cluster.center) ** 2
-                                        for x in cluster.assigned_inputs])
-            avg_variance = sum([cluster.variance for cluster in self.clusters])
-            avg_variance /= (len(self.clusters) - len(one_input_clusters))
-            for cluster in one_input_clusters:
-                cluster.variance = avg_variance
-        return [cluster.variance for cluster in self.clusters]
-
-    def run_epoch(self):
-        """Runs one epoch of the K-Means algorithm, assigning each input
-        to a cluster and recalculating cluster centers.
-        """
-        for c in self.clusters:
-            c.assigned_inputs = []
-        for i in self.inputs:
-            closest_cluster = self.clusters[0]
-            min_distance = euclidean_distance(i, self.clusters[0].center)
-            for c in self.clusters:
-                if euclidean_distance(i, c.center) < min_distance:
-                    min_distance = euclidean_distance(i, c.center)
-                    closest_cluster = c
-            closest_cluster.assigned_inputs.append(i)
-        for c in self.clusters:
-            c.recalculate_center()
-
-    def learn(self, debug_mode=False):
-        """Runs epochs until the classifier converges.
-        """
-        while True:
-            self.last_clusters_centers = [c.center for c in self.clusters]
-            self.run_epoch()
-            if debug_mode and GRAPHS_DRAWABLE:
-                pylab.plot(self.inputs, [1 for i in self.inputs], 'r.')
-                pylab.plot([c.center[0] for c in self.clusters],
-                           [1 for c in xrange(self.K)], 'p')
-                pylab.show()
-            if debug_mode and not GRAPHS_DRAWABLE:
-                print ("Unable to draw graphs because pylab cannot be "
-                       "imported\n.")
-            if all(map(lambda x, y: x.center == y, self.clusters,
-                       self.last_clusters_centers)):
-                break
