@@ -6,13 +6,23 @@
 Contents
 --------
 
-* ``Cluster`` A class representing one cluster in a K-Means classifier,
+* ``Cluster`` A class representing one cluster in K-Means clustering,
               parameterized only by an initial center.
 
-* ``KMeansClassifier`` A class representing an entire classifier, parameterized
-                       by a list of data points and a number of clusters.
+* ``KMeansClusterManager`` A class representing an entire run through,
+                           parameterized by a list of data points and a
+                           number of clusters.
 """
 from utils import euclidean_distance
+
+import random
+import operator
+try:
+    import pylab
+    GRAPHS_DRAWABLE = True
+except ImportError:
+    print "Cannot import matplotlib so graphs will not be drawable.\n"
+    GRAPHS_DRAWABLE = False
 
 
 class Cluster():
@@ -23,7 +33,7 @@ class Cluster():
         """Initialize the cluster.
 
         :param center: Initial center for the cluster (typically a random
-                       point).
+                       data point).
         """
         self.center = center
         self.assigned_inputs = []
@@ -42,23 +52,45 @@ class Cluster():
                 new_center.append(float(total) / len(self.assigned_inputs))
             self.center = new_center
 
+    def __repr__(self):
+        return ("<Cluster centered at %s with assigned inputs: %s"
+                % (self.center, self.assigned_inputs))
 
-class KMeansClassifier():
-    """K-Means classifier.
+
+class KMeansClusterManager():
+    """Manager class for K-Means clustering.
     """
 
     def __init__(self, inputs, K):
-        """Initialize the class.
+        """Initialize the clusters using Forgy initialization:  cluster
+        centroids begin as random data points.
 
-        :param inputs: An list of vectors, where each vector is one sample and
+        :param inputs: A list of vectors, where each vector is one sample and
                        is represented as an iterable of numbers.
-        :param K: The number of clusters in this classifier.
+        :param K: The number of clusters to create.
         """
         self.inputs = inputs
+        # Will throw an error if len(inputs) == 0
+        self.dimensionality = len(inputs[0])
         self.K = K
         self.clusters = [Cluster(random.sample(inputs, 1)[0]) for i in
                          xrange(K)]
         self.last_clusters_centers = []
+        self._elapsed_epochs = 0
+
+    @property
+    def elapsed_epochs(self):
+        """Turns the self._elapsed_epochs variable into a public one nicely.
+        """
+        return self._elapsed_epochs
+
+    @elapsed_epochs.setter
+    def elapsed_epochs(self, num_epochs):
+        """Gives public write access to the self._elapsed_epochs variable.
+
+        :param num_epochs: Number of epochs to set self._elapsed_epochs to.
+        """
+        self._elapsed_epochs = num_epochs
 
     def get_variances(self, one_variance=False):
         """Returns the squared variance for each cluster in a list of length K.
@@ -116,25 +148,43 @@ class KMeansClassifier():
             closest_cluster.assigned_inputs.append(i)
         for c in self.clusters:
             c.recalculate_center()
+        self._elapsed_epochs += 1
+
+    def draw_graph(self):
+        """Draws a graph of all the data points and all the cluster centroids
+        in up to two dimensions.
+        """
+        if GRAPHS_DRAWABLE:
+            # handle one dimensional inputs
+            if self.dimensionality == 1:
+                pylab.plot(self.inputs, [1 for i in self.inputs], 'r.')
+                pylab.plot([c.center[0] for c in self.clusters],
+                           [1 for c in xrange(self.K)], 'p')
+            # FIXME if there's > 1 dimension, pretend there's only two
+            else:
+                inputs_zipped = zip(*self.inputs)
+                pylab.plot(inputs_zipped[0], inputs_zipped[1], 'r.')
+                pylab.plot([c.center[0] for c in self.clusters],
+                           [c.center[1] for c in self.clusters], 'p')
+            pylab.title('Graph after %d epochs' % self._elapsed_epochs)
+            pylab.show()
+        else:
+            print "Unable to draw graphs because pylab cannot be imported.\n"
 
     def learn(self, debug_mode=False):
-        """Runs epochs until the classifier converges.
+        """Runs epochs until the cluster centroids stop moving.
 
         :param debug_mode: Draws graphs of the clusters if True.  Note that
                            drawing the graphs pauses clustering after each
                            epoch.
         """
+        if debug_mode:
+            self.draw_graph()
         while True:
             self.last_clusters_centers = [c.center for c in self.clusters]
             self.run_epoch()
-            if debug_mode and GRAPHS_DRAWABLE:
-                pylab.plot(self.inputs, [1 for i in self.inputs], 'r.')
-                pylab.plot([c.center[0] for c in self.clusters],
-                           [1 for c in xrange(self.K)], 'p')
-                pylab.show()
-            if debug_mode and not GRAPHS_DRAWABLE:
-                print ("Unable to draw graphs because pylab cannot be "
-                       "imported\n.")
+            if debug_mode:
+                self.draw_graph()
             if all(map(lambda x, y: x.center == y, self.clusters,
                        self.last_clusters_centers)):
                 break

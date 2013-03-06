@@ -42,14 +42,7 @@ from utils import sigmoid
 import random
 import operator
 import datetime
-import types
 import sys
-try:
-    import pylab
-    GRAPHS_DRAWABLE = True
-except ImportError:
-    print "Cannot import matplotlib so graphs will not be drawable.\n"
-    GRAPHS_DRAWABLE = False
 
 
 class Neuron():
