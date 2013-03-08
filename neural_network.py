@@ -36,13 +36,14 @@ Contents
 #TODO(jfriedly): document this module better
 #TODO(jfriedly): Make bias neurons simply have an activation function that
 #                always returns 1 rather than special-casing them.
-
-from utils import sigmoid
+#TODO(jfriedly): implement more debugging level stuff
 
 import random
 import operator
 import datetime
 import sys
+
+from ai_algorithms import utils
 
 
 class Neuron():
@@ -83,7 +84,7 @@ class NeuralNetwork():
     """Class to represent a network of neurons.
     """
 
-    def __init__(self, layer_config, activation_func=sigmoid, eta=0.05,
+    def __init__(self, layer_config, activation_func=utils.sigmoid, eta=0.05,
                  use_inertia=False, alpha=1.0, activation_funcs=None):
         """Initialize the network.
 
@@ -139,26 +140,25 @@ class NeuralNetwork():
         # create hidden layers and output layer, using a unique activation
         # function for each neuron if provided, otherwise using the same
         # for each neuron.
-        try:
-            iter(activation)
+        if hasattr(activation, '__iter__'):
             self.layers = [[Neuron(activation_func=activation[l][n]) for n in
                             xrange(self.layer_config[l + 1])] for l in
                            xrange(len(self.layer_config[1:]))]
-        except TypeError:
+        else:
             self.layers = [[Neuron(activation_func=activation) for n in
                             xrange(self.layer_config[l + 1])] for l in
                            xrange(len(self.layer_config[1:]))]
         # insert the input layer
-        self.layers.insert(0,
-                           [Neuron(input=True) for n in
-                            xrange(self.layer_config[0])])
+        self.layers.insert(0, [Neuron(input=True) for n in
+                               xrange(self.layer_config[0])])
         # for each layer that isn't the output layer, insert a bias neuron at
         # the end
         for layer in self.layers[:-1]:
             layer.insert(len(layer), Neuron(bias=True))
 
     def _create_weight_matrix(self, value):
-        """Returns a weight matrix with every weight set to the given value.
+        """Returns a weight matrix with every weight set to the given value or
+        a value derived from the given function.
         See the docstring for reset_weights() below for more info.
 
         :param value: A static value to assign all the weights to or a
@@ -183,7 +183,7 @@ class NeuralNetwork():
             weights.append(layer_weights)
         return weights
 
-    def reset_weights(self):
+    def reset_weights(self, value=None):
         """Resets the weights to random values.
 
         self.weights is a 3D matrix and assumes that every neuron connects to
@@ -198,8 +198,15 @@ class NeuralNetwork():
             the first neuron in the first hidden layer
                 self.weights[0][0][0] is the weight from the first input neuron
                 to the first neuron in the first hidden layer.
+
+        :param value: A static value to assign all the weights to or a
+                      function taking the neuron's location and returning
+                      the desired weight.
         """
-        self.weights = self._create_weight_matrix(self._rand)
+        if value is None:
+            self.weights = self._create_weight_matrix(self._rand)
+        else:
+            self.weights = self._create_weight_matrix(value)
 
     def _next_layer(self, layer):
         """Returns the next layer of neurons.
@@ -299,9 +306,9 @@ class NeuralNetwork():
             # We now iterate over every list of weights to a neuron in the
             # next layer
             for j in xrange(len(self.weights[i])):
-                local_gradient = self._calc_sigmoid_local_gradient_(i, j,
-                                                                    output,
-                                                                    desired)
+                local_gradient = self._calc_sigmoid_local_gradient(i, j,
+                                                                   output,
+                                                                   desired)
                 # We now iterate over every weight to a neuron in the next
                 # layer
                 for k in xrange(len(self.weights[i][j])):
@@ -380,9 +387,9 @@ class NeuralNetworkManager():
     """
 
     def __init__(self, training_set, desired, layer_config,
-                 stop_on_desired_error=False, desired_error=0.0,
-                 activation_func=sigmoid, eta=0.05, use_inertia=False,
-                 alpha=0.9, activation_funcs=None, max_epochs=sys.maxint):
+                 activation_func=utils.sigmoid, eta=0.05, use_inertia=False,
+                 alpha=0.9, activation_funcs=None, desired_error=None,
+                 max_epochs=utils.MAXINT, debug_level=1):
         """Initializes the NeuralNetworkManager.
 
         layer_config will be a list containing the number of neurons in each
@@ -391,16 +398,32 @@ class NeuralNetworkManager():
 
         Example layer_config argument (for CSE 5526 lab1): [4, 4, 1]
 
+        The activation_func argument (if provided) will be the 
+
+        The desired_error and max_epochs arguments are used to control the
+        Neural Networks's stopping condition:
+
+        * If you want your NN to stop after a certain number of epochs, simply
+          pass max_epochs.
+
+        * If you want your NN to stop after some error limit is reached on
+          each sample, just pass desired_error.
+
+        * You may pass both desired_error and max_epochs; the NN will stop
+          as soon as either condition is reached.
+
+        The debug_level argument controls how much debugging you see.  Level 0
+        means no debugging output, level 1 means print epochs only, and further
+        levels are planned.
+
+
         :param training_set: An iterable of all the training samples (each an
                              iterable itself).
-        :param desired: A function that, given an input vector, returns the
-                        desired output vector as a list.
+        :param desired: An iterable of the same length as training_set and
+                        containing all the labels for the training set in the
+                        same order, or a function on an input vector that
+                        returns the desired output vector as a list.
         :param layer_config: The layer configuration, as described above.
-        :param stop_on_desired_error: Boolean indicating whether or not the
-                                      algorithm should terminate when a
-                                      desired error is reached.
-        :param desired_error: The absolute error allowed for each sample in
-                              the training set.
         :param activation_func: The single activation function to give all
                                 hidden layer neurons.
         :param eta: The learning rate (sometimes called alpha).
@@ -413,38 +436,56 @@ class NeuralNetworkManager():
                                  dimensions as layer_config excluding the
                                  first element in layer_config, which will be
                                  the input layer.
+        :param desired_error: The absolute error allowed for each sample in
+                              the training set.
         :param max_epochs: Integer of the maximum number of epochs the
                            algorithm should run for.
+        :param debug_level: Integer controlling how much debugging info is
+                            output.  Output grows from 0, which is silent.
         """
         self.training_set = training_set
-        self._elapsed_epochs = 0
-        self.max_epochs = max_epochs
+        self.elapsed_epochs = 0
         self.init_time = datetime.datetime.now()
         self.desired = desired
-        self.stop_on_desired_error = stop_on_desired_error
+        self.desired_iter = hasattr(desired, '__iter__')
+        self._stop_on_desired_error = desired_error is not None
         self.desired_error = desired_error
+        self.max_epochs = max_epochs
+        self.debug_level = debug_level
+
+        # Used for debugging out elapsed epochs, which can be slow if you
+        # print out too many characters.
+        self._digit_length = 1
+        self._next_order = 10
+
         self.network = NeuralNetwork(layer_config, activation_func, eta=eta,
                                      use_inertia=use_inertia, alpha=alpha,
                                      activation_funcs=activation_funcs)
+        # Sanity check
+        stops = (self._stop_on_desired_error or
+                 (self.max_epochs != utils.MAXINT))
+        assert stops, ("No stopping condition was set!  Pass desired_error or "
+                       "max_epochs.")
 
-    @property
-    def elapsed_epochs(self):
-        """Turns the self._elapsed_epochs variable into a public one nicely.
-        """
-        return self._elapsed_epochs
-
-    @elapsed_epochs.setter
-    def elapsed_epochs(self, num_epochs):
-        """Gives public write access to the self._elapsed_epochs variable.
-
-        :param num_epochs: Number of epochs to set self._elapsed_epochs to.
-        """
-        self._elapsed_epochs = num_epochs
+    def print_epochs(self, inputs, y, d):
+        if self.debug_level == 1:
+            sys.stdout.write('\b' * self._digit_length +
+                             str(self.elapsed_epochs))
+            if self._next_order == self.elapsed_epochs:
+                self._next_order *= 10
+                self._digit_length += 1
+        elif self.debug_level == 2:
+            print "Epoch %d" % self.elapsed_epochs
+            print "Inputs are %s" % inputs
+            print "We output %s, correct was %s" % (y, d)
+            print "Weights are: %s" % self.network.weights
+            print "Weight updates are: %s" % self.network.weight_updates
 
     def get_inputs(self):
         """Gets the next set of inputs for an epoch.
         """
-        return self.training_set[self.random_order.pop()]
+        randval = self.random_order.pop()
+        return randval, self.training_set[randval]
 
     def initialize_epoch(self):
         """Sets the random order that inputs will be drawn in.
@@ -456,7 +497,7 @@ class NeuralNetworkManager():
     def finalize_epoch(self):
         """Increments elapsed_epochs, check for exit condition
         """
-        if self.stop_on_desired_error:
+        if self._stop_on_desired_error:
             self.errors = [abs(x[0]) for x in self.errors]
             if all(map(lambda x: x <= self.desired_error, self.errors)):
                 return True
@@ -471,17 +512,20 @@ class NeuralNetworkManager():
                        training algorithm.
         """
         self.initialize_epoch()
-        for x in xrange(len(self.training_set)):
-            inputs = self.get_inputs()
+        for do_not_use in xrange(len(self.training_set)):
+            randval, inputs = self.get_inputs()
             self.network.set_inputs(inputs)
             y = self.network.forward_propagate()
-            d = self.desired(inputs)
+            if self.desired_iter:
+                d = self.desired[randval]
+            else:
+                d = self.desired(inputs)
             # Don't bother to calculate error if we're ignoring it
-            if self.stop_on_desired_error:
+            if self._stop_on_desired_error:
                 self.errors.append(map(operator.sub, d, y))
             method(y, d)
-        print "%d" % self.elapsed_epochs,
-        sys.stdout.flush()
+        if self.debug_level:
+            self.print_epochs(inputs, y, d)
         if self.finalize_epoch():
             return True
 
@@ -498,10 +542,12 @@ class NeuralNetworkManager():
                        training algorithm.
         """
         self.network.reset_weights()
+        if self.debug_level == 1:
+            print "Epoch:  ",
         while not self.run_epoch(method):
             pass
-        print "-" * 720
-        print "Trained in %d epochs after %ds." % (self.elapsed_epochs,
+        print
+        print "NN trained in %d epochs after %ds." % (self.elapsed_epochs,
             (datetime.datetime.now() - self.init_time).seconds)
         self.elapsed_epochs = 0
 

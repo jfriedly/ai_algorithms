@@ -13,7 +13,7 @@ Contents
                            parameterized by a list of data points and a
                            number of clusters.
 """
-from utils import euclidean_distance
+from ai_algorithms import utils
 
 import random
 import operator
@@ -111,7 +111,8 @@ class KMeansClusterManager():
         if one_variance:
             d_max = 0
             for cluster in self.clusters:
-                this_d_max = max([euclidean_distance(cluster.center, x.center)
+                this_d_max = max([utils.euclidean_distance(cluster.center,
+                                                           x.center)
                                   for x in self.clusters])
                 if this_d_max > d_max:
                     d_max = this_d_max
@@ -123,9 +124,9 @@ class KMeansClusterManager():
                 if len(cluster.assigned_inputs) == 1:
                     one_input_clusters.append(cluster)
                     continue
-                cluster.variance = sum([euclidean_distance(x,
-                                                           cluster.center) ** 2
-                                        for x in cluster.assigned_inputs])
+                cluster.variance = sum([utils.euclidean_distance(x,
+                                                                 cluster.center)
+                                        ** 2 for x in cluster.assigned_inputs])
             avg_variance = sum([cluster.variance for cluster in self.clusters])
             avg_variance /= (len(self.clusters) - len(one_input_clusters))
             for cluster in one_input_clusters:
@@ -140,10 +141,10 @@ class KMeansClusterManager():
             c.assigned_inputs = []
         for i in self.inputs:
             closest_cluster = self.clusters[0]
-            min_distance = euclidean_distance(i, self.clusters[0].center)
+            min_distance = utils.euclidean_distance(i, self.clusters[0].center)
             for c in self.clusters:
-                if euclidean_distance(i, c.center) < min_distance:
-                    min_distance = euclidean_distance(i, c.center)
+                if utils.euclidean_distance(i, c.center) < min_distance:
+                    min_distance = utils.euclidean_distance(i, c.center)
                     closest_cluster = c
             closest_cluster.assigned_inputs.append(i)
         for c in self.clusters:

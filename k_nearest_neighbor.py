@@ -10,9 +10,9 @@ Contents
                     by a list of data points and a number of nearest neighbors
                     to check.
 """
-from utils import euclidean_distance
+import collections
 
-from collections import Counter
+from ai_algorithms import utils
 
 
 class KNNClassifier():
@@ -45,14 +45,13 @@ class KNNClassifier():
                        numbers
         """
         def distance_to_point(other_point):
-            return euclidean_distance(sample, other_point)
+            return utils.euclidean_distance(sample, other_point)
 
         nearest_neighbors = sorted(self.inputs, key=distance_to_point)[:self.K]
         nn_classes = []
         for point in nearest_neighbors:
             nn_classes.append(self.classes[self.inputs.index(point)])
-        counter = Counter(nn_classes)
-        print counter.most_common()
+        counter = collections.Counter(nn_classes)
         return counter.most_common(1)[0][0]
 
     def check(self, sample, correct_class):
