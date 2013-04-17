@@ -28,20 +28,22 @@ Contents
                            passes them along.
 
 """
-#TODO(jfriedly): rewrite using enumerate instead of xrange and indexes
-#TODO(jfriedly): rewrite the matrix algebra stuff using numpy or something
-#TODO(jfriedly): use functools instead of lambdas (not any faster, but more
-#                readable)
-#TODO(jfriedly): rewrite old code to support new module layout
-#TODO(jfriedly): document this module better
+#TODO(jfriedly): Rewrite using enumerate instead of xrange and indexes.
+#TODO(jfriedly): Rewrite the matrix algebra stuff using numpy or something.
+#TODO(jfriedly): Use functools instead of lambdas (not any faster, but more
+#                readable).
+#TODO(jfriedly): Rewrite old code to support new module layout.
+#TODO(jfriedly): Document this module better.
 #TODO(jfriedly): Make bias neurons simply have an activation function that
 #                always returns 1 rather than special-casing them.
-#TODO(jfriedly): implement more debugging level stuff
+#TODO(jfriedly): Implement more debugging level stuff.
+#TODO(jfriedly): Fix the kernel perceptron to support multiclass
 
 import random
 import operator
 import datetime
 import sys
+import numpy
 
 from ai_algorithms import utils
 
@@ -50,7 +52,7 @@ class Neuron():
     """Class to represent a single neuron.
     """
 
-    def __init__(self, activation_func=None, bias=False, input=False):
+    def __init__(self, activation_func=None, bias=False, input_neuron=False):
         """Initialize the neuron.
 
         bias and input should not both be true at the same time, even for
@@ -58,9 +60,9 @@ class Neuron():
 
         :param activation_func: Activation function for this neuron.
         :param bias: Boolean indicating that the neuron is a bias neuron.
-        :param input: If False, the neuron will not be an input neuron;
-                      otherwise the value of input will be this input
-                      neuron's value.
+        :param input_neuron: If False, the neuron will not be an input neuron;
+                             otherwise the value of input will be this input
+                             neuron's value.
         """
         if activation_func:
             self.activate = activation_func
@@ -68,9 +70,9 @@ class Neuron():
         if bias:
             self.value = 1
         self.input_neuron = False
-        if input is not False:
+        if input_neuron is not False:
             self.input_neuron = True
-            self.value = input
+            self.value = input_neuron
 
     def __repr__(self):
         if self.bias_neuron:
@@ -85,7 +87,8 @@ class NeuralNetwork():
     """
 
     def __init__(self, layer_config, activation_func=utils.sigmoid, eta=0.05,
-                 use_inertia=False, alpha=1.0, activation_funcs=None):
+                 use_inertia=False, alpha=1.0, activation_funcs=None,
+                 kernel_func=None):
         """Initialize the network.
 
         layer_config will be a list containing the number of neurons in each
@@ -107,6 +110,9 @@ class NeuralNetwork():
                                  dimensions as layer_config excluding the
                                  first element in layer_config, which will be
                                  the input layer.
+        :param kernel_func: If this NN should be sped up by using a kernel,
+                            pass the kernel function to be used here.  Kernel
+                            MLPs are not supported, only SLPs.
 
         self.num_layers is the number of layers (including the input layer)
         self.m is the number of input vectors
@@ -116,9 +122,15 @@ class NeuralNetwork():
         self.alpha = alpha
         self.use_inertia = use_inertia
         self.layer_config = layer_config
+        self.kernel_func = kernel_func
         self.num_layers = len(layer_config)
         self.m = self.layer_config[0]
         self._create_layers(activation=activation_funcs or activation_func)
+
+        if self.kernel_func is not None:
+            self._kernel = {}
+            self.kernel_mutable = True
+
         self.reset_weights()
 
         self.weight_updates = self._create_weight_matrix(0)
@@ -149,7 +161,7 @@ class NeuralNetwork():
                             xrange(self.layer_config[l + 1])] for l in
                            xrange(len(self.layer_config[1:]))]
         # insert the input layer
-        self.layers.insert(0, [Neuron(input=True) for n in
+        self.layers.insert(0, [Neuron(input_neuron=True) for n in
                                xrange(self.layer_config[0])])
         # for each layer that isn't the output layer, insert a bias neuron at
         # the end
@@ -252,6 +264,13 @@ class NeuralNetwork():
         Requires the input neurons to have already been set.
         Returns a list of the final output.
         """
+        if self._kernel is not None:
+            # Skip the last neuron because it's a bias neuron.
+            sample = [x.value for x in self.layers[0]][:self.m]
+            kernel_values = [self.kernel(x, sample) for x in self.training_set]
+            weighted_inputs = numpy.dot(self.alphas, kernel_values)
+            #FIXME(jfriedly): This doesn't support multiclass!
+            return [self.layers[-1][0].activate(weighted_inputs)]
         # Outer for loop goes self.num_layers - 1 times because we don't
         # forward propagate from the output layer.
         for i in xrange(self.num_layers - 1):
@@ -281,24 +300,26 @@ class NeuralNetwork():
                                           self.layers[0][j].value)
 
     # FIXME this won't work outside of lab2
-    def lms(self, output, desired):
+    def lms_learn(self, output, desired, index=None):
         """Implements LMS learning, specifically for CSE 5526 lab2 (not
         reusable).
 
         :param output: Iterable of the output layer's values.
         :param desired: Iterable of the desired output values.
+        :param index: Not used.  Only here to support the API.
         """
         error = desired[0] - output[0]
         for i in xrange(len(self.weights[1][0])):
             value = self.layers[1][i].value
             self.weights[1][0][i] += self.eta * value * error
 
-    def backpropagate(self, output, desired):
+    def backprop_learn(self, output, desired, index=None):
         """Runs backpropagation starting with the output layer back until
         it reaches the input layer, batch updating weights along the way.
 
         :param output: Iterable of the output layer's values.
         :param desired: Iterable of the desired output values.
+        :param index: Not used.  Only here to support the API.
         """
         # [::-1] iterates backwards through the list, and we iterate over each
         # 2D weight matrix
@@ -316,6 +337,17 @@ class NeuralNetwork():
                                                     self.layers[i][k].value)
         self._batch_update_weights()
 
+    def kernel_learn(self, output, desired, index=None):
+        """Updates the alphas used in the kernel perceptron.
+
+        :param output: Iterable of the output layer's values.
+        :param desired: Iterable of the desired output values.
+        :param index: The index of the current training sample.
+        """
+        if numpy.dot(output, desired) <= 0:
+            #FIXME(jfriedly): This only works for two class perceptrons!
+            self.alphas[index] += desired[0]
+
     def use(self, sample):
         """Takes a real-life sample (not one from the training_set) and
         returns the trained neural networks' output for that sample.
@@ -325,6 +357,23 @@ class NeuralNetwork():
         """
         self.set_inputs(sample)
         return self.forward_propagate()
+
+    def kernel(self, sample1, sample2, **kwargs):
+        """Handles kernel access for the Neural Network.  The dot product of
+        the kernel_func applied to each sample is computed, stored in the
+        matrix, and returned.  If the pair is already in the matrix, it is not
+        recomputed.  Once training is complete, the kernel becomes immutable.
+
+        :param sample1: The first sample to examine.
+        :param sample2: The second sample to examine.
+        :param kwargs: Key word arguments passed on to the kernel function
+        """
+        if (tuple(sample1), tuple(sample2)) in self._kernel:
+            return self._kernel[(tuple(sample1), tuple(sample2))]
+        value = self.kernel_func(sample1, sample2, **kwargs)
+        if self.kernel_mutable is True:
+            self._kernel[(tuple(sample1), tuple(sample2))] = value
+        return value
 
     def _batch_update_weights(self):
         """Update all the weights at once as a batch so that backpropagation
@@ -389,7 +438,8 @@ class NeuralNetworkManager():
     def __init__(self, training_set, desired, layer_config,
                  activation_func=utils.sigmoid, eta=0.05, use_inertia=False,
                  alpha=0.9, activation_funcs=None, desired_error=None,
-                 max_epochs=utils.MAXINT, debug_level=1):
+                 max_epochs=utils.MAXINT, debug_level=1, kernel_func=None,
+                 **kernel_kwargs):
         """Initializes the NeuralNetworkManager.
 
         layer_config will be a list containing the number of neurons in each
@@ -418,7 +468,7 @@ class NeuralNetworkManager():
 
 
         :param training_set: An iterable of all the training samples (each an
-                             iterable itself).
+                             iterable itself).  Must support len().
         :param desired: An iterable of the same length as training_set and
                         containing all the labels for the training set in the
                         same order, or a function on an input vector that
@@ -442,6 +492,9 @@ class NeuralNetworkManager():
                            algorithm should run for.
         :param debug_level: Integer controlling how much debugging info is
                             output.  Output grows from 0, which is silent.
+        :param kernel_func: If this NN should be sped up by using a kernel,
+                            pass the kernel function to be used here.  Kernel
+                            MLPs are not supported, only SLPs.
         """
         self.training_set = training_set
         self.elapsed_epochs = 0
@@ -452,6 +505,8 @@ class NeuralNetworkManager():
         self.desired_error = desired_error
         self.max_epochs = max_epochs
         self.debug_level = debug_level
+        self.kernel_func = kernel_func
+        self.kernel_kwargs = kernel_kwargs
 
         # Used for debugging out elapsed epochs, which can be slow if you
         # print out too many characters.
@@ -460,12 +515,29 @@ class NeuralNetworkManager():
 
         self.network = NeuralNetwork(layer_config, activation_func, eta=eta,
                                      use_inertia=use_inertia, alpha=alpha,
-                                     activation_funcs=activation_funcs)
+                                     activation_funcs=activation_funcs,
+                                     kernel_func=kernel_func)
         # Sanity check
         stops = (self._stop_on_desired_error or
                  (self.max_epochs != utils.MAXINT))
         assert stops, ("No stopping condition was set!  Pass desired_error or "
                        "max_epochs.")
+
+    def compute_kernel(self):
+        """Computes the kernel for this network.
+        """
+        print "Computing kernel (%d)  " % len(self.training_set),
+        for sample1 in self.training_set:
+            for sample2 in self.training_set:
+                self.network.kernel(sample1, sample2, **self.kernel_kwargs)
+            self.elapsed_epochs += 1
+            if self.debug_level:
+                self.print_epochs(0, 0, 0)
+        print
+        self._digit_length = 1
+        self._next_order = 10
+        self.network.kernel_mutable = False
+        self.network.training_set = self.training_set
 
     def print_epochs(self, inputs, y, d):
         if self.debug_level == 1:
@@ -474,6 +546,7 @@ class NeuralNetworkManager():
             if self._next_order == self.elapsed_epochs:
                 self._next_order *= 10
                 self._digit_length += 1
+            sys.stdout.flush()
         elif self.debug_level == 2:
             print "Epoch %d" % self.elapsed_epochs
             print "Inputs are %s" % inputs
@@ -523,7 +596,7 @@ class NeuralNetworkManager():
             # Don't bother to calculate error if we're ignoring it
             if self._stop_on_desired_error:
                 self.errors.append(map(operator.sub, d, y))
-            method(y, d)
+            method(y, d, index=randval)
         if self.debug_level:
             self.print_epochs(inputs, y, d)
         if self.finalize_epoch():
@@ -533,7 +606,9 @@ class NeuralNetworkManager():
         """Runs through epochs until an exit condition is reached using the
         desired method (currently backpropagation or LMS).  This can be
         referenced using the public ``network`` attribute of a
-        NeuralNetworkManager instance::
+        NeuralNetworkManager instance
+
+        .. code:: python
 
             nnm = NeuralNetworkManager(*args, **kwargs)
             nnm.learn(nnm.network.backpropagation)
@@ -542,8 +617,12 @@ class NeuralNetworkManager():
                        training algorithm.
         """
         self.network.reset_weights()
+        if self.kernel_func is not None:
+            self.compute_kernel()
+            self.network.alphas = [0] * len(self.training_set)
         if self.debug_level == 1:
-            print "Epoch:  ",
+            self.elapsed_epochs = 0
+            print "Epoch: (%d)  " % self.max_epochs,
         while not self.run_epoch(method):
             pass
         print

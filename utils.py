@@ -19,9 +19,11 @@ Contents
 #TODO(jfriedly): Put a try-except around the import numpy and write a (slow)
 # implementation that can be used if numpy isn't installed.
 #TODO(jfriedly): Add the new functions to the module docstring.
+#TODO(jfriedly): Make the gaussian kernel efficient.
 import sys
 import math
 import numpy
+import random
 
 
 MAXINT = sys.maxint
@@ -107,7 +109,8 @@ def argmax(pairs):
     :param pairs: Iterable of arg: value pairs to examine.
     """
     argmax = -1
-    # Smallest integer value that can 
+    # Smallest integer value that can be represented on this system without
+    # using long ints.
     maximum = MININT
     for arg, value in pairs:
         if value > maximum:
@@ -116,26 +119,60 @@ def argmax(pairs):
     return argmax
 
 
-def vectorize(scalar, dimensions):
-    """Turns a scalar s into a sparse vector of d dimensions with the
-    s-indexed element a 1 (0-indexed, so the s-1'th element).
+def vectorize(start, dimensions, stop=None):
+    """Turns two scalars start and stop into a sparse vector of d dimensions
+    elements indexed from start to stop as ones.  If stop is not passed, only
+    the element at the start index will be a one.  The vector is zero-indexed,
+    so the ones start at the start-1'th element and stop at the stop-1'th.
 
-    :param scalar: 0-indexed integer value that should be a 1 in the vector.
+    Example:
+
+    .. code:: python
+
+        >>> vectorize(4, 10, stop=7)
+        [0, 0, 0, 0, 1, 1, 1, 1, 0, 0]
+
+    :param start: 0-indexed integer value of the first 1 in the vector.
     :param dimensions: Integer dimensionality of the vector.
+    :param stop: 0-indexed integer value of the last 1 in the vector.
     """
-    vector = [0 for i in xrange(dimensions)]
-    vector[scalar] = 1
+    if stop is None:
+        stop = start
+    assert stop >= start, "Stop cannot be less than start in vectorize"
+    vector = [0] * dimensions
+    for i in xrange(start, stop+1):
+        vector[i] = 1
     return vector
 
 
 def devectorize(vector):
-    """Does the opposite of the above function.  Given a vector, it picks the
-    largest value from the vector and returns that value's integer index
-    within the vector.
+    """Does the opposite of the above function.  Given a sparse vector
+    that contains a string of ones, pick out the beginning and ending indices
+    of the ones and return them.
+
+    Example:
+
+    .. code:: python
+
+        >>> devectorize([0, 0, 0, 0, 1, 1, 1, 1, 0, 0])
+        (4, 7)
 
     :param vector: Vector to examine for the largest value.
+    :returns: tuple of (start, stop) where start is the index of the first one
+              and stop is the index of the last one in the string.  Both are
+              zero-indexed.
     """
-    return argmax(enumerate(vector))
+    start = 0
+    stop = 0
+    ones_seen = False
+    for i in xrange(len(vector)):
+        if ones_seen == False and vector[i] == 1:
+            ones_seen = True
+            start = i
+        if ones_seen == True and vector[i] != 1:
+            stop = i - 1
+            break
+    return start, stop
 
 
 def normalize(data):
@@ -171,3 +208,34 @@ def gaussian(x, mean, stddev):
     coeff = (1/(stddev * sqrt_2pi))
     exp = math.e ** (((-1)/(2 * stddev ** 2)) * (x - mean) ** 2)
     return coeff * exp
+
+
+def linear_kernel(sample1, sample2, **kwargs):
+    """Linear kernel function, aka the identity kernel.
+
+    :param sample1: The first sample to the kernel.
+    :param sample2: The second sample to the kernel.
+    """
+    return numpy.dot(sample1, sample2)
+
+
+def gaussian_kernel(sample1, sample2, sigma=1, **kwargs):
+    top = euclidean_distance(sample1, sample2) ** 2
+    frac = top / (2.0 * sigma ** 2)
+    return math.exp(-frac)
+
+
+def approx_gaussian_kernel(sample1, sample2, p=5, mu=0, sigma=1, **kwargs):
+    """Based on Bochner's theorem, we can form a low dimensional approximation
+    of the Gaussian kernel using this function.
+    """
+    data_dims = len(sample1)
+    coef = math.sqrt(2.0 / p)
+    phi1 = [None] * p
+    phi2 = [None] * p
+    for m in xrange(p):
+        randvector = [random.gauss(mu, sigma) for d in xrange(data_dims)]
+        bias = random.uniform(0, 2 * math.pi)
+        for phi, sample in ((phi1, sample1), (phi2, sample2)):
+            phi[m] = coef * math.cos(numpy.dot(randvector, sample) + bias)
+    return numpy.dot(phi1, phi2)
