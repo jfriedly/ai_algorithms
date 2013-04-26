@@ -81,16 +81,64 @@ def bipolar_threshold(v, threshold=0.5):
     return 1 if v > threshold else -1
 
 
-def euclidean_distance(point1, point2):
-    """Returns the Euclidean Distance between two points in *n* dimensions.
-    Uses numpy's efficient implementation of Euclidean distance.
+def bipolar_sigmoid(v, a=1, threshold=0.5):
+    return bipolar_threshold(sigmoid(v, a=a), threshold=threshold)
 
-    :param point1: A point in *n* dimensions, represented as an iterable of
-                   numbers.
-    :param point2: A point in *n* dimensions, represented as an iterable of
-                   numbers.
+
+def euclidean_distance(p1, p2):
+    """Returns the Euclidean Distance between two points in *n* dimensions.
+
+    :param p1: A point in *n* dimensions, represented as an iterable of
+               numbers.
+    :param p2: A point in *n* dimensions, represented as an iterable of
+               numbers.
     """
-    return numpy.linalg.norm(numpy.array(point1) - numpy.array(point2))
+    # For reasons I cannot fathom, numpy and scipy's recommended ways of
+    # calculating Euclidean distance are slow as hell.  I reproduced the
+    # results at http://goo.gl/EiQgt and tested scipy as well.  My results:
+    #  1.1s for fastest_calc_dist
+    #  1.3s for math_calc_dist (a modified form of this is below)
+    # 27.3s for math.sqrt(sum(numpy.array(p1) - numpy.array(p2)))
+    # 28.9s for numpy.linalg.norm(numpy.array(p1) - numpy.array(p2))
+    # 30.0s for np.sqrt(sum(numpy.array(p1) - numpy.array(p2)))
+    # 40.9s for scipy.spatial.distance.euclidean(p1, p2)
+    #
+    # I retested using numpy arrays for all the data points and got better
+    # results, but still disappointing:
+    #  2.8s for math_calc_dist
+    #  5.3s for fastest_calc_dist
+    # 14.5s for numpy.linalg.norm(p1 - p2)
+    # 16.7s for numpy.linalg.norm(numpy.array(p1) - numpy.array(p2))
+    # 30.0s for scipy.spatial.distance.euclidean(p1, p2)
+    #
+    # Speculation:  Maybe the fact that numpy/scipy have to handle n dimensions
+    # made them slower?  Nope, see below.
+    #
+    # I retested by rewriting math_calc_dist and fastest_calc_dist to support
+    # n dimensions and they're still blazing fast.  Below are the times for
+    # data that came in as tuples and numpy arrays, respectively:
+    # 2.6s and 4.2s for math_calc_dist
+    # 2.2s and 7.9s for fastest_calc_dist
+    n = len(p1)
+    return math.sqrt(sum((math.pow((p1[i] - p2[i]), 2) for i in xrange(n))))
+
+
+def squared_distance(p1, p2):
+    """Returns the Euclidean Distance between two points in *n* dimensions.
+
+    :param p1: A point in *n* dimensions, represented as an iterable of
+               numbers.
+    :param p2: A point in *n* dimensions, represented as an iterable of
+               numbers.
+    """
+    # I performed similar testing for this function as I did for Euclidean
+    # distance above.  My results are below for data as tuples and arrays,
+    # respectively:
+    #  2.4s and  4.0s for math_calc_dist
+    #  2.2s and  7.8s for fastest_calc_dist
+    # 36.0s and 21.0s for scipy.spatial.distance.sqeuclidean(p1, p2)
+    n = len(p1)
+    return sum((math.pow((p1[i] - p2[i]), 2) for i in xrange(n)))
 
 
 def identity(value):
@@ -225,17 +273,15 @@ def gaussian_kernel(sample1, sample2, sigma=1, **kwargs):
     return math.exp(-frac)
 
 
-def approx_gaussian_kernel(sample1, sample2, p=5, mu=0, sigma=1, **kwargs):
+def approx_gaussian_kernel(sample1, sample2, p=5, randvectors=[], biases=[],
+                           **kwargs):
     """Based on Bochner's theorem, we can form a low dimensional approximation
     of the Gaussian kernel using this function.
     """
-    data_dims = len(sample1)
     coef = math.sqrt(2.0 / p)
     phi1 = [None] * p
     phi2 = [None] * p
     for m in xrange(p):
-        randvector = [random.gauss(mu, sigma) for d in xrange(data_dims)]
-        bias = random.uniform(0, 2 * math.pi)
         for phi, sample in ((phi1, sample1), (phi2, sample2)):
-            phi[m] = coef * math.cos(numpy.dot(randvector, sample) + bias)
+            phi[m] = coef * math.cos(numpy.dot(randvectors[m], sample) + biases[m])
     return numpy.dot(phi1, phi2)

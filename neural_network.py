@@ -44,6 +44,7 @@ import operator
 import datetime
 import sys
 import numpy
+import functools
 
 from ai_algorithms import utils
 
@@ -264,7 +265,7 @@ class NeuralNetwork():
         Requires the input neurons to have already been set.
         Returns a list of the final output.
         """
-        if self._kernel is not None:
+        if self.kernel_func is not None:
             # Skip the last neuron because it's a bias neuron.
             sample = [x.value for x in self.layers[0]][:self.m]
             kernel_values = [self.kernel(x, sample) for x in self.training_set]
@@ -508,6 +509,10 @@ class NeuralNetworkManager():
         self.kernel_func = kernel_func
         self.kernel_kwargs = kernel_kwargs
 
+        if self.kernel_func is not None:
+            new_kernel_func = functools.partial(self.kernel_func,
+                                                **self.kernel_kwargs)
+
         # Used for debugging out elapsed epochs, which can be slow if you
         # print out too many characters.
         self._digit_length = 1
@@ -516,7 +521,7 @@ class NeuralNetworkManager():
         self.network = NeuralNetwork(layer_config, activation_func, eta=eta,
                                      use_inertia=use_inertia, alpha=alpha,
                                      activation_funcs=activation_funcs,
-                                     kernel_func=kernel_func)
+                                     kernel_func=new_kernel_func)
         # Sanity check
         stops = (self._stop_on_desired_error or
                  (self.max_epochs != utils.MAXINT))
@@ -529,7 +534,7 @@ class NeuralNetworkManager():
         print "Computing kernel (%d)  " % len(self.training_set),
         for sample1 in self.training_set:
             for sample2 in self.training_set:
-                self.network.kernel(sample1, sample2, **self.kernel_kwargs)
+                self.network.kernel(sample1, sample2)
             self.elapsed_epochs += 1
             if self.debug_level:
                 self.print_epochs(0, 0, 0)

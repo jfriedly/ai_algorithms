@@ -13,6 +13,10 @@ Contents
                            parameterized by a list of data points and a
                            number of clusters.
 """
+#TODO(jfriedly): Figure out if Euclidean distance if necessary to calculate
+# the variances and used squared distance if you can.
+#TODO(jfriedly): Figure out how to draw 3D graphs and fail with a warning when
+# trying to draw 4+D graphs.
 from ai_algorithms import utils
 
 import random
@@ -35,7 +39,7 @@ class Cluster():
         :param center: Initial center for the cluster (typically a random
                        data point).
         """
-        self.center = center
+        self.center = tuple(center)
         self.assigned_inputs = []
         self.variance = 0
 
@@ -61,20 +65,21 @@ class KMeansClusterManager():
     """Manager class for K-Means clustering.
     """
 
-    def __init__(self, inputs, K):
+    def __init__(self, K, inputs):
         """Initialize the clusters using Forgy initialization:  cluster
         centroids begin as random data points.
 
+        :param K: The number of clusters to create.
         :param inputs: A list of vectors, where each vector is one sample and
                        is represented as an iterable of numbers.
-        :param K: The number of clusters to create.
         """
         self.inputs = inputs
-        # Will throw an error if len(inputs) == 0
+        assert hasattr(inputs, '__len__'), "inputs must support __len__"
+        assert not len(inputs) == 0, "Cannot pass inputs with 0 length"
         self.dimensionality = len(inputs[0])
         self.K = K
         self.clusters = [Cluster(random.sample(inputs, 1)[0]) for i in
-                         xrange(K)]
+                         xrange(self.K)]
         self.last_clusters_centers = []
         self._elapsed_epochs = 0
 
@@ -141,10 +146,12 @@ class KMeansClusterManager():
             c.assigned_inputs = []
         for i in self.inputs:
             closest_cluster = self.clusters[0]
-            min_distance = utils.euclidean_distance(i, self.clusters[0].center)
+            # Optimization:  Make the clusters hold onto the current distances
+            # so that we don't have to recalculate these every time.
+            min_distance = utils.squared_distance(i, self.clusters[0].center)
             for c in self.clusters:
-                if utils.euclidean_distance(i, c.center) < min_distance:
-                    min_distance = utils.euclidean_distance(i, c.center)
+                if utils.squared_distance(i, c.center) < min_distance:
+                    min_distance = utils.squared_distance(i, c.center)
                     closest_cluster = c
             closest_cluster.assigned_inputs.append(i)
         for c in self.clusters:
@@ -158,15 +165,15 @@ class KMeansClusterManager():
         if GRAPHS_DRAWABLE:
             # handle one dimensional inputs
             if self.dimensionality == 1:
-                pylab.plot(self.inputs, [1 for i in self.inputs], 'r.')
+                pylab.plot(self.inputs, [1 for i in self.inputs], 'bx')
                 pylab.plot([c.center[0] for c in self.clusters],
-                           [1 for c in xrange(self.K)], 'p')
+                           [1 for c in xrange(self.K)], 'ro')
             # FIXME if there's > 1 dimension, pretend there's only two
             else:
                 inputs_zipped = zip(*self.inputs)
-                pylab.plot(inputs_zipped[0], inputs_zipped[1], 'r.')
+                pylab.plot(inputs_zipped[0], inputs_zipped[1], 'bx')
                 pylab.plot([c.center[0] for c in self.clusters],
-                           [c.center[1] for c in self.clusters], 'p')
+                           [c.center[1] for c in self.clusters], 'ro')
             pylab.title('Graph after %d epochs' % self._elapsed_epochs)
             pylab.show()
         else:
@@ -188,4 +195,5 @@ class KMeansClusterManager():
                 self.draw_graph()
             if all(map(lambda x, y: x.center == y, self.clusters,
                        self.last_clusters_centers)):
+                print "KMeans clustering complete."
                 break
