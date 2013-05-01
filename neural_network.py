@@ -38,6 +38,8 @@ Contents
 #                always returns 1 rather than special-casing them.
 #TODO(jfriedly): Implement more debugging level stuff.
 #TODO(jfriedly): Fix the kernel perceptron to support multiclass
+#TODO(jfriedly): Throw an error if hidden layers are passed simultaneously
+#                with a kernel_func.
 
 import random
 import operator
@@ -508,6 +510,7 @@ class NeuralNetworkManager():
         self.debug_level = debug_level
         self.kernel_func = kernel_func
         self.kernel_kwargs = kernel_kwargs
+        new_kernel_func = None
 
         if self.kernel_func is not None:
             new_kernel_func = functools.partial(self.kernel_func,
